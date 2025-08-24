@@ -1,6 +1,6 @@
 {
-  "name": "svelte-5-extension",
-  "description": "A starter template for building browser extensions with Svelte 5, Tailwind 4, and WXT",
+  "name": "fauna-microlearning-extension",
+  "description": "Uma extensão para ajudar os moderadores do fauna-microlearning.",
   "private": true,
   "version": "0.0.1",
   "keywords": [
@@ -36,6 +36,7 @@
     "@tailwindcss/vite": "4.0.0-alpha.24",
     "@tsconfig/svelte": "^5.0.4",
     "@types/chrome": "^0.0.269",
+    "@wxt-dev/auto-icons": "^1.1.0",
     "@wxt-dev/module-svelte": "^1.0.1",
     "prettier": "^3.3.3",
     "prettier-plugin-svelte": "^3.2.6",

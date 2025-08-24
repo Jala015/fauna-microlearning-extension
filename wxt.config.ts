@@ -6,10 +6,11 @@ import tailwindcss from "@tailwindcss/vite";
 // See https://wxt.dev/api/config.html
 export default defineConfig({
   srcDir: "src",
-  modules: ["@wxt-dev/module-svelte"],
+  modules: ["@wxt-dev/module-svelte", "@wxt-dev/auto-icons"],
   manifest: {
-    name: "Fauna microlearning",
-    description: "Extensão para ajudar a salvar fotos no database do Redis",
+    name: "iCurator",
+    description:
+      "Extensão para ajudar a salvar fotos e nível máximo taxonômico para o jogo de fauna microlearning",
     permissions: ["storage", "activeTab", "tabs", "scripting"],
     host_permissions: [
       "https://www.inaturalist.org/*",

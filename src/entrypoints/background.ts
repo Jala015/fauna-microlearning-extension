@@ -14,6 +14,21 @@ interface GetImageMessage {
   };
 }
 
+interface SaveTaxonomicLevelMessage {
+  action: "saveTaxonomicLevel";
+  data: {
+    speciesKey: string;
+    level: string;
+  };
+}
+
+interface GetTaxonomicLevelMessage {
+  action: "getTaxonomicLevel";
+  data: {
+    speciesKey: string;
+  };
+}
+
 interface BackgroundResponse {
   success: boolean;
   error?: string;
@@ -29,6 +44,10 @@ export default defineBackground(() => {
       return saveImageToRedis(message as SaveImageMessage);
     } else if (message.action === "getImage") {
       return getImageFromRedis(message as GetImageMessage);
+    } else if (message.action === "saveTaxonomicLevel") {
+      return saveTaxonomicLevelToRedis(message as SaveTaxonomicLevelMessage);
+    } else if (message.action === "getTaxonomicLevel") {
+      return getTaxonomicLevelFromRedis(message as GetTaxonomicLevelMessage);
     }
     return Promise.resolve({ success: false, error: "Ação não reconhecida" });
   });
@@ -123,6 +142,146 @@ async function saveImageToRedis(
         error instanceof Error
           ? error.message
           : "Erro desconhecido ao salvar no Redis",
+    };
+  }
+}
+
+async function saveTaxonomicLevelToRedis(
+  message: SaveTaxonomicLevelMessage,
+): Promise<BackgroundResponse> {
+  const { speciesKey, level } = message.data;
+
+  try {
+    // Buscar configurações do Redis
+    const config = await browser.storage.sync.get(["redisUrl", "redisToken"]);
+    const redisUrl = config.redisUrl as string;
+    const redisToken = config.redisToken as string;
+
+    if (!redisUrl || !redisToken) {
+      throw new Error("Configuração do Redis não encontrada");
+    }
+
+    // Criar chave para o nível taxonômico
+    const levelKey = `species:taxonomiclevel:${speciesKey}`;
+
+    console.log(
+      `Salvando nível taxonômico no Redis - Chave: ${levelKey}, Valor: ${level}`,
+    );
+
+    // Salvar nível taxonômico
+    const response = await fetch(
+      `${redisUrl.trim()}/set/${encodeURIComponent(levelKey)}/${encodeURIComponent(level)}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${redisToken.trim()}`,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `Erro HTTP ao salvar nível taxonômico ${response.status}: ${errorText}`,
+      );
+    }
+
+    const result = await response.json();
+    if (result.error) {
+      throw new Error(
+        `Erro do Redis ao salvar nível taxonômico: ${result.error}`,
+      );
+    }
+
+    if (result.result === "OK") {
+      console.log(`✅ Nível taxonômico salvo com sucesso no Redis`);
+      return { success: true };
+    } else {
+      throw new Error(
+        `Resposta inesperada do Redis: ${JSON.stringify(result)}`,
+      );
+    }
+  } catch (error) {
+    console.error("❌ Erro ao salvar nível taxonômico no Redis:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Erro desconhecido ao salvar nível taxonômico no Redis",
+    };
+  }
+}
+
+async function getTaxonomicLevelFromRedis(
+  message: GetTaxonomicLevelMessage,
+): Promise<BackgroundResponse> {
+  const { speciesKey } = message.data;
+
+  try {
+    // Buscar configurações do Redis
+    const config = await browser.storage.sync.get(["redisUrl", "redisToken"]);
+    const redisUrl = config.redisUrl as string;
+    const redisToken = config.redisToken as string;
+
+    if (!redisUrl || !redisToken) {
+      throw new Error("Configuração do Redis não encontrada");
+    }
+
+    // Criar chave para buscar o nível taxonômico
+    const levelKey = `species:taxonomiclevel:${speciesKey}`;
+
+    console.log(`Buscando nível taxonômico no Redis - Chave: ${levelKey}`);
+
+    // Buscar nível taxonômico
+    const response = await fetch(
+      `${redisUrl.trim()}/get/${encodeURIComponent(levelKey)}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${redisToken.trim()}`,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `Erro HTTP ao buscar nível taxonômico ${response.status}: ${errorText}`,
+      );
+    }
+
+    const result = await response.json();
+    if (result.error) {
+      throw new Error(
+        `Erro do Redis ao buscar nível taxonômico: ${result.error}`,
+      );
+    }
+
+    if (result.result === null) {
+      console.log(
+        `❌ Nenhum nível taxonômico encontrado para a chave: ${levelKey}`,
+      );
+      return { success: true, data: null };
+    }
+
+    console.log(
+      `✅ Nível taxonômico encontrado no Redis - Chave: ${levelKey}, Valor: ${result.result}`,
+    );
+    return {
+      success: true,
+      data: result.result,
+    };
+  } catch (error) {
+    console.error("❌ Erro ao buscar nível taxonômico no Redis:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Erro desconhecido ao buscar nível taxonômico no Redis",
     };
   }
 }

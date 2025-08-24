@@ -9,20 +9,37 @@ interface ImageData {
   attribution: string;
 }
 
+interface TaxonomicLevel {
+  name: string;
+  displayName: string;
+  order: number;
+}
+
+const TAXONOMIC_LEVELS: TaxonomicLevel[] = [
+  { name: "kingdom", displayName: "Reino", order: 1 },
+  { name: "phylum", displayName: "Filo", order: 2 },
+  { name: "class", displayName: "Classe", order: 3 },
+  { name: "order", displayName: "Ordem", order: 4 },
+  { name: "family", displayName: "Família", order: 5 },
+  { name: "genus", displayName: "Gênero", order: 6 },
+  { name: "subgenus", displayName: "Subgênero", order: 7 },
+  { name: "species", displayName: "Espécie", order: 8 },
+];
+
 export default defineContentScript({
   matches: ["https://www.inaturalist.org/taxa/*"],
   main() {
     console.log("🔍 iCurador de imagens de microlearning carregado");
 
     if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", initCurator);
+      document.addEventListener("DOMContentLoaded", initCurador);
     } else {
-      initCurator();
+      initCurador();
     }
   },
 });
 
-async function initCurator() {
+async function initCurador() {
   const speciesKey = extractSpeciesKey();
   if (!speciesKey) {
     console.log("❌ Não foi possível extrair species key");
@@ -45,6 +62,11 @@ async function initCurator() {
   setTimeout(() => {
     addSaveButtonToModal(speciesKey);
   }, 1000);
+
+  // Adicionar dropdown de nível taxonômico
+  setTimeout(() => {
+    addTaxonomicLevelDropdown(speciesKey);
+  }, 1500);
 }
 
 async function checkRedisConfiguration(): Promise<boolean> {
@@ -148,7 +170,7 @@ function addSaveButtonToModal(speciesKey: string) {
   // Criar botão
   const saveBtn = document.createElement("button");
   saveBtn.className = "curator-save-btn";
-  saveBtn.innerHTML = "💎";
+  saveBtn.innerHTML = "💎 Imagem para o taxon (iCurator)";
   saveBtn.title = "Salvar imagem para curadoria";
 
   // Estilo do botão
@@ -157,7 +179,7 @@ function addSaveButtonToModal(speciesKey: string) {
     top: 16px;
     right: 16px;
     z-index: 1001;
-    background: rgba(0, 0, 0, 0.8);
+    background: rgba(0, 96, 69, 0.8);
     color: white;
     border: none;
     border-radius: 8px;
@@ -170,12 +192,12 @@ function addSaveButtonToModal(speciesKey: string) {
 
   // Hover effect
   saveBtn.addEventListener("mouseenter", () => {
-    saveBtn.style.background = "rgba(0, 0, 0, 0.9)";
+    saveBtn.style.background = "rgba(0, 96, 69, 0.9)";
     saveBtn.style.transform = "scale(1.1)";
   });
 
   saveBtn.addEventListener("mouseleave", () => {
-    saveBtn.style.background = "rgba(0, 0, 0, 0.8)";
+    saveBtn.style.background = "rgba(0, 96, 69, 0.8)";
     saveBtn.style.transform = "scale(1)";
   });
 
@@ -271,7 +293,7 @@ async function saveImage(
     })) as BackgroundResponse;
 
     if (response?.success) {
-      button.innerHTML = "✅";
+      button.innerHTML = "✅ Imagem salva no iCurator";
       button.style.background = "rgba(0, 128, 0, 0.8)";
       console.log(`✅ Imagem salva: ${speciesKey}`);
     } else {
@@ -279,7 +301,7 @@ async function saveImage(
     }
 
     setTimeout(() => {
-      button.innerHTML = "💎";
+      button.innerHTML = "💎 Imagem para o taxon (iCurator)";
       button.style.background = "rgba(0, 0, 0, 0.8)";
       button.disabled = false;
     }, 2000);
@@ -289,9 +311,191 @@ async function saveImage(
     button.style.background = "rgba(128, 0, 0, 0.8)";
 
     setTimeout(() => {
-      button.innerHTML = "💎";
+      button.innerHTML = "💎 Imagem para o taxon (iCurator)";
       button.style.background = "rgba(0, 0, 0, 0.8)";
       button.disabled = false;
     }, 3000);
+  }
+}
+
+function extractTaxonomicHierarchy(): TaxonomicLevel[] {
+  const availableLevels: TaxonomicLevel[] = [];
+
+  // Tentar extrair da breadcrumb de taxonomia
+  const breadcrumbLinks = document.querySelectorAll(
+    '.breadcrumbs a[href*="/taxa/"]',
+  );
+  if (breadcrumbLinks.length > 0) {
+    // Mapear os links encontrados para níveis taxonômicos
+    breadcrumbLinks.forEach((link, index) => {
+      if (index < TAXONOMIC_LEVELS.length) {
+        availableLevels.push(TAXONOMIC_LEVELS[index]);
+      }
+    });
+  }
+
+  // Se não encontrou breadcrumbs, tentar extrair da seção de classificação
+  const classificationSection = document.querySelector(
+    ".classification, .taxonomy",
+  );
+  if (classificationSection && availableLevels.length === 0) {
+    const taxonomyItems =
+      classificationSection.querySelectorAll('a[href*="/taxa/"]');
+    taxonomyItems.forEach((item, index) => {
+      if (index < TAXONOMIC_LEVELS.length) {
+        availableLevels.push(TAXONOMIC_LEVELS[index]);
+      }
+    });
+  }
+
+  // Fallback: assumir que pelo menos reino, filo, classe, ordem, família, gênero e espécie estão disponíveis
+  if (availableLevels.length === 0) {
+    return TAXONOMIC_LEVELS.slice(0, 6); // Reino até Gênero por padrão
+  }
+
+  return availableLevels;
+}
+
+async function addTaxonomicLevelDropdown(speciesKey: string) {
+  // Verificar se já existe o dropdown
+  if (document.querySelector(".curator-taxonomic-dropdown")) {
+    return;
+  }
+
+  // Encontrar onde inserir o dropdown (próximo ao nome do táxon)
+  const taxonNameContainer = document.querySelector(".taxon-name, .title, h1");
+  if (!taxonNameContainer) {
+    console.log("❌ Container do nome do táxon não encontrado");
+    return;
+  }
+
+  const availableLevels = extractTaxonomicHierarchy();
+
+  // Buscar nível salvo anteriormente
+  let savedLevel: string | null = null;
+  try {
+    const response = (await browser.runtime.sendMessage({
+      action: "getTaxonomicLevel",
+      data: { speciesKey },
+    })) as BackgroundResponse;
+
+    if (response?.success && response.data) {
+      savedLevel = response.data;
+    }
+  } catch (error) {
+    console.log("Erro ao buscar nível taxonômico salvo:", error);
+  }
+
+  // Criar container do dropdown
+  const dropdownContainer = document.createElement("div");
+  dropdownContainer.className = "curator-taxonomic-dropdown";
+  dropdownContainer.style.cssText = `
+    margin-top: 12px;
+    padding: 12px;
+    background: oklch(90.5% 0.093 164.15);
+    border: 1px solid oklch(43.2% 0.095 166.913);
+    border-radius: 8px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  `;
+
+  // Criar label
+  const label = document.createElement("label");
+  label.innerHTML = "🔍 <strong>Nível máximo iCurador:</strong>";
+  label.style.cssText = `
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #495057;
+    font-weight: 600;
+  `;
+
+  // Criar select
+  const select = document.createElement("select");
+  select.className = "curator-level-select";
+  select.style.cssText = `
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    background: white;
+    font-size: 14px;
+    color: #495057;
+    cursor: pointer;
+  `;
+
+  // Adicionar opção vazia
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "Selecione o nível máximo...";
+  defaultOption.disabled = true;
+  defaultOption.selected = !savedLevel;
+  select.appendChild(defaultOption);
+
+  // Adicionar opções dos níveis disponíveis
+  availableLevels.forEach((level) => {
+    const option = document.createElement("option");
+    option.value = level.name;
+    option.textContent = level.displayName;
+    if (savedLevel === level.name) {
+      option.selected = true;
+    }
+    select.appendChild(option);
+  });
+
+  // Adicionar evento de mudança
+  select.addEventListener("change", async (e) => {
+    const selectedLevel = (e.target as HTMLSelectElement).value;
+    if (selectedLevel) {
+      await saveTaxonomicLevel(speciesKey, selectedLevel, select);
+    }
+  });
+
+  // Montar o dropdown
+  dropdownContainer.appendChild(label);
+  dropdownContainer.appendChild(select);
+
+  // Inserir depois do container do nome
+  taxonNameContainer.parentElement?.insertBefore(
+    dropdownContainer,
+    taxonNameContainer.nextSibling,
+  );
+
+  console.log(`✅ Dropdown de nível taxonômico adicionado para ${speciesKey}`);
+}
+
+async function saveTaxonomicLevel(
+  speciesKey: string,
+  level: string,
+  select: HTMLSelectElement,
+) {
+  const originalBg = select.style.background;
+  select.style.background = "#fff3cd";
+  select.disabled = true;
+
+  try {
+    const response = (await browser.runtime.sendMessage({
+      action: "saveTaxonomicLevel",
+      data: { speciesKey, level },
+    })) as BackgroundResponse;
+
+    if (response?.success) {
+      select.style.background = "#d4edda";
+      console.log(`✅ Nível taxonômico salvo: ${speciesKey} -> ${level}`);
+
+      setTimeout(() => {
+        select.style.background = originalBg;
+        select.disabled = false;
+      }, 1500);
+    } else {
+      throw new Error(response?.error || "Erro desconhecido");
+    }
+  } catch (error) {
+    console.error("❌ Erro ao salvar nível taxonômico:", error);
+    select.style.background = "#f8d7da";
+
+    setTimeout(() => {
+      select.style.background = originalBg;
+      select.disabled = false;
+    }, 2000);
   }
 }

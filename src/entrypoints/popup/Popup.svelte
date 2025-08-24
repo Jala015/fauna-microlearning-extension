@@ -6,6 +6,7 @@
   let loading = true;
   let error = null;
   let redisConfigured = false;
+  let savedTaxonomicLevel = null;
 
   onMount(async () => {
     await checkRedisConfiguration();
@@ -13,6 +14,7 @@
 
     if (pageContext?.type === "taxon" && pageContext.speciesKey) {
       await loadSavedImage(pageContext.speciesKey);
+      await loadSavedTaxonomicLevel(pageContext.speciesKey);
     }
 
     loading = false;
@@ -143,6 +145,38 @@
     }
   }
 
+  async function loadSavedTaxonomicLevel(speciesKey) {
+    try {
+      const response = await browser.runtime.sendMessage({
+        action: "getTaxonomicLevel",
+        data: { speciesKey },
+      });
+
+      if (response && response.success && response.data) {
+        savedTaxonomicLevel = response.data;
+      } else {
+        savedTaxonomicLevel = null;
+      }
+    } catch (err) {
+      console.error("Erro ao carregar nível taxonômico:", err);
+      savedTaxonomicLevel = null;
+    }
+  }
+
+  function getTaxonomicLevelDisplayName(level) {
+    const levels = {
+      kingdom: "Reino",
+      phylum: "Filo",
+      class: "Classe",
+      order: "Ordem",
+      family: "Família",
+      genus: "Gênero",
+      subgenus: "Subgênero",
+      species: "Espécie",
+    };
+    return levels[level] || level;
+  }
+
   function navigateToTaxon() {
     if (pageContext?.type === "observation" && pageContext.taxonId) {
       const taxonUrl = `https://www.inaturalist.org/taxa/${pageContext.taxonId}`;
@@ -155,10 +189,12 @@
   }
 </script>
 
-<main class="p-4 min-w-[320px] max-w-[400px] bg-white">
+<main
+  class="p-4 min-w-[320px] max-w-[400px] bg-emerald-200 shadow-lg border-emerald-800"
+>
   <!-- Header -->
   <header
-    class="flex items-center justify-between mb-4 pb-3 border-b border-gray-200"
+    class="flex items-center justify-between mb-4 pb-3 border-b border-emerald-800"
   >
     <h1 class="text-xl font-bold text-gray-800 flex items-center gap-2">
       <span class="text-2xl">🔍</span>
@@ -227,13 +263,26 @@
   {:else if pageContext?.type === "taxon"}
     <!-- Taxon Page -->
     <div class="space-y-4">
-      <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+      <div class="bg-amber-50/50 border border-green-200 rounded-lg p-3">
         <div class="flex items-center gap-2 text-green-800">
           <span class="text-lg">🔬</span>
-          <span class="font-medium">Página de Táxon</span>
+          <span class="font-medium">Página do Táxon</span>
         </div>
         <p class="text-sm text-green-700 mt-1">ID: {pageContext.speciesKey}</p>
       </div>
+
+      <!-- Taxonomic Level Display -->
+      {#if savedTaxonomicLevel}
+        <div class="bg-blue-50/50 border border-blue-200 rounded-lg p-3">
+          <div class="flex items-center gap-2 text-blue-800">
+            <span class="text-lg">🎯</span>
+            <span class="font-medium">Nível Máximo de Identificação</span>
+          </div>
+          <p class="text-sm text-blue-700 mt-1">
+            {getTaxonomicLevelDisplayName(savedTaxonomicLevel)}
+          </p>
+        </div>
+      {/if}
 
       {#if savedImageData && savedImageData.imageUrl}
         <!-- Saved Image -->
@@ -246,7 +295,7 @@
             <img
               src={savedImageData.imageUrl}
               alt="Imagem salva do táxon"
-              class="w-full h-48 object-cover bg-gray-100"
+              class="w-full h-48 object-cover bg-gray-100/50"
               on:error={(e) => {
                 if (e.target && e.target.src) {
                   e.target.src =
@@ -254,7 +303,7 @@
                 }
               }}
             />
-            <div class="p-3 bg-gray-50 space-y-2">
+            <div class="p-3 bg-gray-50/50 space-y-2">
               {#if savedImageData.attribution}
                 <div
                   class="text-sm text-gray-700 border-l-4 border-green-500 pl-3"
@@ -285,6 +334,19 @@
             <p class="font-medium">ℹ️ Nota:</p>
             <p>Apenas imagens com licença Creative Commons podem ser salvas</p>
           </div>
+        </div>
+      {/if}
+
+      {#if !savedTaxonomicLevel}
+        <!-- No Saved Taxonomic Level -->
+        <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+          <div class="flex items-center gap-2 text-gray-600">
+            <span class="text-lg">🎯</span>
+            <span class="font-medium">Nível Taxonômico</span>
+          </div>
+          <p class="text-xs text-gray-500 mt-1">
+            Configure o nível máximo de identificação na página do táxon
+          </p>
         </div>
       {/if}
     </div>
