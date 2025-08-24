@@ -38,6 +38,9 @@ interface BackgroundResponse {
 export default defineBackground(() => {
   console.log("Background script iniciado", { id: browser.runtime.id });
 
+  // Criar menus de contexto
+  createContextMenus();
+
   // Escutar mensagens do content script
   browser.runtime.onMessage.addListener((message: any, sender: any) => {
     if (message.action === "saveImage") {
@@ -51,7 +54,194 @@ export default defineBackground(() => {
     }
     return Promise.resolve({ success: false, error: "Ação não reconhecida" });
   });
+
+  // Escutar cliques no menu de contexto
+  browser.contextMenus.onClicked.addListener(handleContextMenuClick);
+
+  // Escutar mudanças de aba para atualizar menus
+  browser.tabs.onActivated.addListener(async (activeInfo) => {
+    const tab = await browser.tabs.get(activeInfo.tabId);
+    if (tab.url?.includes("inaturalist.org/taxa/")) {
+      const taxonMatch = tab.url.match(/\/taxa\/(\d+)/);
+      if (taxonMatch) {
+        await updateContextMenusWithCurrentLevel(taxonMatch[1]);
+      }
+    }
+  });
+
+  // Escutar mudanças de URL para atualizar menus
+  browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+    if (changeInfo.url && tab.url?.includes("inaturalist.org/taxa/")) {
+      const taxonMatch = tab.url.match(/\/taxa\/(\d+)/);
+      if (taxonMatch) {
+        await updateContextMenusWithCurrentLevel(taxonMatch[1]);
+      }
+    }
+  });
 });
+
+async function createContextMenus() {
+  try {
+    // Remover menus existentes
+    await browser.contextMenus.removeAll();
+
+    // Menu principal - apenas para páginas de táxon
+    browser.contextMenus.create({
+      id: "icurator-main",
+      title: "iCurator",
+      contexts: ["all"],
+      documentUrlPatterns: ["https://www.inaturalist.org/taxa/*"],
+    });
+
+    // Níveis taxonômicos disponíveis
+    const taxonomicLevels = [
+      { name: "kingdom", displayName: "Reino" },
+      { name: "phylum", displayName: "Filo" },
+      { name: "class", displayName: "Classe" },
+      { name: "order", displayName: "Ordem" },
+      { name: "family", displayName: "Família" },
+      { name: "genus", displayName: "Gênero" },
+      { name: "subgenus", displayName: "Subgênero" },
+      { name: "species", displayName: "Espécie" },
+    ];
+
+    // Criar submenu para cada nível taxonômico
+    taxonomicLevels.forEach((level) => {
+      browser.contextMenus.create({
+        id: `icurator-level-${level.name}`,
+        title: `🎯 ${level.displayName}`,
+        parentId: "icurator-main",
+        contexts: ["all"],
+        documentUrlPatterns: ["https://www.inaturalist.org/taxa/*"],
+      });
+    });
+
+    console.log("✅ Menus de contexto criados com sucesso");
+  } catch (error) {
+    console.error("❌ Erro ao criar menus de contexto:", error);
+  }
+}
+
+async function handleContextMenuClick(info: any, tab: any) {
+  try {
+    // Verificar se é um clique em nível taxonômico
+    if (info.menuItemId.startsWith("icurator-level-")) {
+      const levelName = info.menuItemId.replace("icurator-level-", "");
+      await handleTaxonomicLevelSelection(levelName, tab);
+    } else {
+      console.log("Menu item não reconhecido:", info.menuItemId);
+    }
+  } catch (error) {
+    console.error("❌ Erro ao processar clique no menu de contexto:", error);
+  }
+}
+
+async function handleTaxonomicLevelSelection(levelName: string, tab: any) {
+  if (!tab?.url) return;
+
+  const taxonMatch = tab.url.match(
+    /https:\/\/www\.inaturalist\.org\/taxa\/(\d+)/,
+  );
+  if (!taxonMatch) return;
+
+  const speciesKey = taxonMatch[1];
+
+  try {
+    // Salvar o nível taxonômico selecionado
+    const response = await saveTaxonomicLevelToRedis({
+      action: "saveTaxonomicLevel",
+      data: { speciesKey, level: levelName },
+    });
+
+    const levels: { [key: string]: string } = {
+      kingdom: "Reino",
+      phylum: "Filo",
+      class: "Classe",
+      order: "Ordem",
+      family: "Família",
+      genus: "Gênero",
+      subgenus: "Subgênero",
+      species: "Espécie",
+    };
+
+    if (response.success) {
+      // Recriar menus para destacar o novo nível selecionado
+      await updateContextMenusWithCurrentLevel(speciesKey);
+
+      // Mostrar notificação de sucesso
+      await browser.notifications.create({
+        type: "basic",
+        iconUrl: "icon/48.png",
+        title: "iCurador - Nível Salvo",
+        message: `🎯 Nível máximo definido como: ${levels[levelName]}\nTáxon ID: ${speciesKey}`,
+      });
+    } else {
+      throw new Error(response.error || "Erro desconhecido");
+    }
+  } catch (error) {
+    console.error("❌ Erro ao salvar nível taxonômico:", error);
+    await browser.notifications.create({
+      type: "basic",
+      iconUrl: "icon/48.png",
+      title: "iCurador - Erro",
+      message: "❌ Erro ao salvar nível taxonômico",
+    });
+  }
+}
+
+async function updateContextMenusWithCurrentLevel(speciesKey: string) {
+  try {
+    // Buscar o nível atual
+    const levelResponse = await getTaxonomicLevelFromRedis({
+      action: "getTaxonomicLevel",
+      data: { speciesKey },
+    });
+
+    const currentLevel = levelResponse.success ? levelResponse.data : null;
+
+    // Remover menus existentes
+    await browser.contextMenus.removeAll();
+
+    // Menu principal
+    browser.contextMenus.create({
+      id: "icurator-main",
+      title: "🔍 iCurador",
+      contexts: ["all"],
+      documentUrlPatterns: ["https://www.inaturalist.org/taxa/*"],
+    });
+
+    // Níveis taxonômicos disponíveis
+    const taxonomicLevels = [
+      { name: "kingdom", displayName: "Reino" },
+      { name: "phylum", displayName: "Filo" },
+      { name: "class", displayName: "Classe" },
+      { name: "order", displayName: "Ordem" },
+      { name: "family", displayName: "Família" },
+      { name: "genus", displayName: "Gênero" },
+      { name: "subgenus", displayName: "Subgênero" },
+      { name: "species", displayName: "Espécie" },
+    ];
+
+    // Criar submenu para cada nível taxonômico, destacando o atual
+    taxonomicLevels.forEach((level) => {
+      const isSelected = currentLevel === level.name;
+      const title = isSelected
+        ? `✅ ${level.displayName} (atual)`
+        : `🎯 ${level.displayName}`;
+
+      browser.contextMenus.create({
+        id: `icurator-level-${level.name}`,
+        title: title,
+        parentId: "icurator-main",
+        contexts: ["all"],
+        documentUrlPatterns: ["https://www.inaturalist.org/taxa/*"],
+        enabled: !isSelected, // Desabilitar o item atual
+      });
+    });
+  } catch (error) {
+    console.error("❌ Erro ao atualizar menus de contexto:", error);
+  }
+}
 
 async function saveImageToRedis(
   message: SaveImageMessage,

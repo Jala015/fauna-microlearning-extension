@@ -11,7 +11,14 @@ export default defineConfig({
     name: "iCurator",
     description:
       "Extensão para ajudar a salvar fotos e nível máximo taxonômico para o jogo de fauna microlearning",
-    permissions: ["storage", "activeTab", "tabs", "scripting"],
+    permissions: [
+      "storage",
+      "activeTab",
+      "tabs",
+      "scripting",
+      "contextMenus",
+      "notifications",
+    ],
     host_permissions: [
       "https://www.inaturalist.org/*",
       "https://*.upstash.io/*", // Para testar conexão

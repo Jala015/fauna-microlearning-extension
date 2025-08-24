@@ -7,6 +7,19 @@
   let error = null;
   let redisConfigured = false;
   let savedTaxonomicLevel = null;
+  let isSavingLevel = false;
+  let levelSaveMessage = null;
+
+  const TAXONOMIC_LEVELS = [
+    { name: "kingdom", displayName: "Reino" },
+    { name: "phylum", displayName: "Filo" },
+    { name: "class", displayName: "Classe" },
+    { name: "order", displayName: "Ordem" },
+    { name: "family", displayName: "Família" },
+    { name: "genus", displayName: "Gênero" },
+    { name: "subgenus", displayName: "Subgênero" },
+    { name: "species", displayName: "Espécie" },
+  ];
 
   onMount(async () => {
     await checkRedisConfiguration();
@@ -184,6 +197,46 @@
     }
   }
 
+  async function saveTaxonomicLevel(level) {
+    if (!level) return;
+
+    isSavingLevel = true;
+    levelSaveMessage = null;
+
+    try {
+      const response = await browser.runtime.sendMessage({
+        action: "saveTaxonomicLevel",
+        data: { speciesKey: pageContext.speciesKey, level },
+      });
+
+      if (response && response.success) {
+        savedTaxonomicLevel = level;
+        levelSaveMessage = {
+          type: "success",
+          text: "Nível salvo com sucesso!",
+        };
+      } else {
+        levelSaveMessage = {
+          type: "error",
+          text: "Erro ao salvar nível taxonômico",
+        };
+      }
+    } catch (err) {
+      console.error("Erro ao salvar nível taxonômico:", err);
+      levelSaveMessage = {
+        type: "error",
+        text: "Erro ao salvar nível taxonômico",
+      };
+    } finally {
+      isSavingLevel = false;
+
+      // Limpar mensagem após 3 segundos
+      setTimeout(() => {
+        levelSaveMessage = null;
+      }, 3000);
+    }
+  }
+
   function openSettings() {
     browser.runtime.openOptionsPage();
   }
@@ -271,18 +324,70 @@
         <p class="text-sm text-green-700 mt-1">ID: {pageContext.speciesKey}</p>
       </div>
 
-      <!-- Taxonomic Level Display -->
-      {#if savedTaxonomicLevel}
-        <div class="bg-blue-50/50 border border-blue-200 rounded-lg p-3">
-          <div class="flex items-center gap-2 text-blue-800">
-            <span class="text-lg">🎯</span>
-            <span class="font-medium">Nível Máximo de Identificação</span>
-          </div>
-          <p class="text-sm text-blue-700 mt-1">
-            {getTaxonomicLevelDisplayName(savedTaxonomicLevel)}
-          </p>
+      <!-- Taxonomic Level Selection -->
+      <div class="bg-blue-50/50 border border-blue-200 rounded-lg p-3">
+        <div class="flex items-center gap-2 text-blue-800 mb-3">
+          <span class="text-lg">🎯</span>
+          <span class="font-medium">Nível Máximo de Identificação</span>
         </div>
-      {/if}
+
+        <div class="space-y-2">
+          <label
+            for="taxonomic-level-select"
+            class="text-sm text-blue-700 font-medium"
+          >
+            Selecione o nível máximo:
+          </label>
+          <select
+            id="taxonomic-level-select"
+            class="w-full p-2 border border-blue-300 rounded-md bg-white text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={isSavingLevel}
+            on:change={(e) => saveTaxonomicLevel(e.target.value)}
+          >
+            <option value="" disabled selected={!savedTaxonomicLevel}>
+              Selecione o nível...
+            </option>
+            {#each TAXONOMIC_LEVELS as level}
+              <option
+                value={level.name}
+                selected={savedTaxonomicLevel === level.name}
+              >
+                {level.displayName}
+              </option>
+            {/each}
+          </select>
+
+          {#if isSavingLevel}
+            <div class="flex items-center gap-2 mt-2 text-sm text-blue-600">
+              <div
+                class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"
+              ></div>
+              <span>Salvando...</span>
+            </div>
+          {/if}
+
+          {#if levelSaveMessage}
+            <div
+              class="mt-2 text-sm p-2 rounded-md {levelSaveMessage.type ===
+              'success'
+                ? 'bg-green-100 text-green-800 border border-green-200'
+                : 'bg-red-100 text-red-800 border border-red-200'}"
+            >
+              {levelSaveMessage.text}
+            </div>
+          {/if}
+
+          {#if savedTaxonomicLevel && !isSavingLevel}
+            <p class="text-sm text-blue-600 mt-2">
+              Atual: {getTaxonomicLevelDisplayName(savedTaxonomicLevel)}
+            </p>
+          {:else if !savedTaxonomicLevel && !isSavingLevel && !levelSaveMessage}
+            <p class="text-sm text-gray-500 mt-2 italic">
+              Nenhum nível máximo definido
+            </p>
+          {/if}
+        </div>
+      </div>
 
       {#if savedImageData && savedImageData.imageUrl}
         <!-- Saved Image -->
@@ -334,19 +439,6 @@
             <p class="font-medium">ℹ️ Nota:</p>
             <p>Apenas imagens com licença Creative Commons podem ser salvas</p>
           </div>
-        </div>
-      {/if}
-
-      {#if !savedTaxonomicLevel}
-        <!-- No Saved Taxonomic Level -->
-        <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-          <div class="flex items-center gap-2 text-gray-600">
-            <span class="text-lg">🎯</span>
-            <span class="font-medium">Nível Taxonômico</span>
-          </div>
-          <p class="text-xs text-gray-500 mt-1">
-            Configure o nível máximo de identificação na página do táxon
-          </p>
         </div>
       {/if}
     </div>
