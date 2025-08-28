@@ -29,6 +29,23 @@ interface GetTaxonomicLevelMessage {
   };
 }
 
+interface SaveAlternativesMessage {
+  action: "saveAlternatives";
+  data: {
+    speciesKey: string;
+    alternatives: {
+      [key: string]: string; // 1:nome_popular, 1:nome_cientifico, etc.
+    };
+  };
+}
+
+interface GetAlternativesMessage {
+  action: "getAlternatives";
+  data: {
+    speciesKey: string;
+  };
+}
+
 interface BackgroundResponse {
   success: boolean;
   error?: string;
@@ -47,6 +64,16 @@ export default defineBackground(() => {
       return saveImageToRedis(message as SaveImageMessage);
     } else if (message.action === "getImage") {
       return getImageFromRedis(message as GetImageMessage);
+    } else if (message.action === "saveAlternatives") {
+      return saveAlternativesToRedis(message as SaveAlternativesMessage);
+    } else if (message.action === "getAlternatives") {
+      return getAlternativesFromRedis(message as GetAlternativesMessage);
+    } else if (message.action === "openAlternativesManager") {
+      // Abrir popup da extensão (não há API direta, mas podemos tentar)
+      browser.action?.openPopup?.().catch(() => {
+        console.log("Não foi possível abrir popup automaticamente");
+      });
+      return Promise.resolve({ success: true });
     } else if (message.action === "saveTaxonomicLevel") {
       return saveTaxonomicLevelToRedis(message as SaveTaxonomicLevelMessage);
     } else if (message.action === "getTaxonomicLevel") {
@@ -565,5 +592,251 @@ async function getImageFromRedis(
           ? error.message
           : "Erro desconhecido ao buscar no Redis",
     };
+  }
+}
+
+// Helperzinho seguro pra parsear JSON sem quebrar
+function safeParseJSON(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Salva alternativas no Redis usando chaves individuais (REST API Upstash)
+ * Formato: species:alternativas:{idInat}:{numero da alternativa}
+ * Faz uma requisição SET para cada alternativa
+ */
+async function saveAlternativesToRedis(
+  message: SaveAlternativesMessage,
+): Promise<BackgroundResponse> {
+  console.group("🟣 saveAlternativesToRedis");
+  try {
+    // --- Config ---
+    const cfg = await browser.storage.sync.get(["redisUrl", "redisToken"]);
+    const redisUrlRaw = (cfg.redisUrl || "").toString();
+    const redisUrl = redisUrlRaw.replace(/\/+$/, ""); // remove barra final
+    const redisToken = (cfg.redisToken || "").toString().trim();
+
+    console.log("→ Config:", {
+      redisUrl,
+      tokenLength: redisToken.length,
+      tokenPreview: redisToken ? `${redisToken.slice(0, 6)}…` : "(vazio)",
+    });
+
+    if (!redisUrl || !redisToken) {
+      console.error("❌ Configuração do Redis ausente");
+      console.groupEnd();
+      return { success: false, error: "Configuração do Redis não encontrada" };
+    }
+
+    // --- Entrada ---
+    const { speciesKey, alternatives } = message.data || {};
+    console.log("→ Input:", { speciesKey, alternatives });
+
+    if (!alternatives || Object.keys(alternatives).length === 0) {
+      console.warn("⚠️ Nenhuma alternativa para salvar");
+      console.groupEnd();
+      return {
+        success: false,
+        error: "Nenhuma alternativa fornecida para salvar",
+      };
+    }
+
+    // Converter alternativas em formato para requisições individuais
+    const alternativasParaSalvar: { [key: string]: any } = {};
+
+    // Organizar por número da alternativa
+    Object.entries(alternatives).forEach(([chave, valor]) => {
+      const match = chave.match(/^(\d+):(nome_popular|nome_cientifico)$/);
+      if (match) {
+        const [, numero, tipo] = match;
+        if (!alternativasParaSalvar[numero]) {
+          alternativasParaSalvar[numero] = {};
+        }
+        alternativasParaSalvar[numero][tipo] = valor;
+      }
+    });
+
+    console.log("→ Alternativas organizadas:", alternativasParaSalvar);
+
+    // Fazer uma requisição SET para cada alternativa
+    const promises = Object.entries(alternativasParaSalvar).map(
+      async ([numero, dados]) => {
+        const key = `species:alternativas:${speciesKey}:${numero}`;
+        const valor = JSON.stringify(dados);
+        const url = `${redisUrl}/set/${encodeURIComponent(key)}/${encodeURIComponent(valor)}`;
+
+        console.log(`→ Salvando alternativa ${numero}:`, { key, dados });
+
+        const response = await fetch(url, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${redisToken}`,
+            "Content-Type": "application/json",
+          },
+        });
+
+        const rawText = await response.text();
+        console.log(
+          `← Response alternativa ${numero}:`,
+          response.status,
+          rawText,
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Erro HTTP ao salvar alternativa ${numero}: ${response.status} - ${rawText}`,
+          );
+        }
+
+        const result = safeParseJSON(rawText);
+        if (result?.error) {
+          throw new Error(
+            `Erro do Redis ao salvar alternativa ${numero}: ${result.error}`,
+          );
+        }
+
+        if (result?.result !== "OK") {
+          throw new Error(
+            `Resposta inesperada do Redis para alternativa ${numero}: ${JSON.stringify(result)}`,
+          );
+        }
+
+        return { numero, sucesso: true };
+      },
+    );
+
+    // Aguardar todas as requisições
+    const resultados = await Promise.all(promises);
+    console.log("✅ Todas alternativas salvas:", resultados);
+
+    console.groupEnd();
+    return { success: true };
+  } catch (err: any) {
+    console.error("❌ Exceção:", err);
+    console.groupEnd();
+    return { success: false, error: err?.message || "Erro desconhecido" };
+  }
+}
+
+/**
+ * Recupera alternativas via requisições GET individuais (REST API Upstash)
+ * Busca chaves no formato: species:alternativas:{idInat}:{numero da alternativa}
+ */
+async function getAlternativesFromRedis(
+  message: GetAlternativesMessage,
+): Promise<BackgroundResponse> {
+  console.group("🟣 getAlternativesFromRedis");
+  try {
+    // --- Config ---
+    const cfg = await browser.storage.sync.get(["redisUrl", "redisToken"]);
+    const redisUrlRaw = (cfg.redisUrl || "").toString();
+    const redisUrl = redisUrlRaw.replace(/\/+$/, "");
+    const redisToken = (cfg.redisToken || "").toString().trim();
+
+    console.log("→ Config:", {
+      redisUrl,
+      tokenLength: redisToken.length,
+      tokenPreview: redisToken ? `${redisToken.slice(0, 6)}…` : "(vazio)",
+    });
+
+    if (!redisUrl || !redisToken) {
+      console.error("❌ Configuração do Redis ausente");
+      console.groupEnd();
+      return { success: false, error: "Configuração do Redis não encontrada" };
+    }
+
+    // --- Entrada ---
+    const { speciesKey } = message.data || {};
+    console.log("→ Input:", { speciesKey });
+
+    // Buscar alternativas 1, 2 e 3
+    const promises = [1, 2, 3].map(async (numero) => {
+      const key = `species:alternativas:${speciesKey}:${numero}`;
+      const url = `${redisUrl}/get/${encodeURIComponent(key)}`;
+
+      console.log(`→ Buscando alternativa ${numero}:`, { key, url });
+
+      try {
+        const response = await fetch(url, {
+          method: "GET",
+          headers: { Authorization: `Bearer ${redisToken}` },
+        });
+
+        const rawText = await response.text();
+        console.log(
+          `← Response alternativa ${numero}:`,
+          response.status,
+          rawText,
+        );
+
+        if (!response.ok) {
+          console.warn(
+            `⚠️ Erro HTTP ao buscar alternativa ${numero}: ${response.status}`,
+          );
+          return { numero, dados: null };
+        }
+
+        const result = safeParseJSON(rawText);
+        if (result?.error) {
+          console.warn(
+            `⚠️ Erro Redis ao buscar alternativa ${numero}: ${result.error}`,
+          );
+          return { numero, dados: null };
+        }
+
+        if (result?.result === null || result?.result === undefined) {
+          console.log(`ℹ️ Alternativa ${numero} não encontrada`);
+          return { numero, dados: null };
+        }
+
+        // Tentar parsear o JSON da alternativa
+        const dadosAlternativa = safeParseJSON(result.result);
+        if (dadosAlternativa) {
+          console.log(`✅ Alternativa ${numero} encontrada:`, dadosAlternativa);
+          return { numero, dados: dadosAlternativa };
+        } else {
+          console.warn(
+            `⚠️ Dados da alternativa ${numero} não são JSON válido:`,
+            result.result,
+          );
+          return { numero, dados: null };
+        }
+      } catch (err) {
+        console.warn(`⚠️ Exceção ao buscar alternativa ${numero}:`, err);
+        return { numero, dados: null };
+      }
+    });
+
+    // Aguardar todas as requisições
+    const resultados = await Promise.all(promises);
+    console.log("→ Resultados das buscas:", resultados);
+
+    // Converter para o formato esperado
+    const alternativasEncontradas: Record<string, string> = {};
+
+    resultados.forEach(({ numero, dados }) => {
+      if (dados) {
+        if (dados.nome_popular) {
+          alternativasEncontradas[`${numero}:nome_popular`] =
+            dados.nome_popular;
+        }
+        if (dados.nome_cientifico) {
+          alternativasEncontradas[`${numero}:nome_cientifico`] =
+            dados.nome_cientifico;
+        }
+      }
+    });
+
+    console.log("✅ Alternativas convertidas:", alternativasEncontradas);
+    console.groupEnd();
+    return { success: true, data: alternativasEncontradas };
+  } catch (err: any) {
+    console.error("❌ Exceção:", err);
+    console.groupEnd();
+    return { success: false, error: err?.message || "Erro desconhecido" };
   }
 }

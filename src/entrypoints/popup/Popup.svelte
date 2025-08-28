@@ -10,6 +10,17 @@
   let isSavingLevel = false;
   let levelSaveMessage = null;
 
+  // Variáveis para alternativas
+  let savedAlternatives = {};
+  let showAlternativesSection = false;
+  let isSavingAlternatives = false;
+  let alternativesSaveMessage = null;
+  let alternatives = {
+    1: { nome_popular: "", nome_cientifico: "" },
+    2: { nome_popular: "", nome_cientifico: "" },
+    3: { nome_popular: "", nome_cientifico: "" },
+  };
+
   const TAXONOMIC_LEVELS = [
     { name: "kingdom", displayName: "Reino" },
     { name: "phylum", displayName: "Filo" },
@@ -28,6 +39,7 @@
     if (pageContext?.type === "taxon" && pageContext.speciesKey) {
       await loadSavedImage(pageContext.speciesKey);
       await loadSavedTaxonomicLevel(pageContext.speciesKey);
+      await loadSavedAlternatives(pageContext.speciesKey);
     }
 
     loading = false;
@@ -174,6 +186,112 @@
       console.error("Erro ao carregar nível taxonômico:", err);
       savedTaxonomicLevel = null;
     }
+  }
+
+  async function loadSavedAlternatives(speciesKey) {
+    try {
+      const response = await browser.runtime.sendMessage({
+        action: "getAlternatives",
+        data: { speciesKey },
+      });
+
+      if (response && response.success && response.data) {
+        savedAlternatives = response.data;
+        // Preencher o formulário com os dados salvos
+        populateAlternativesForm(response.data);
+      } else {
+        savedAlternatives = {};
+        resetAlternativesForm();
+      }
+    } catch (err) {
+      console.error("Erro ao carregar alternativas:", err);
+      savedAlternatives = {};
+      resetAlternativesForm();
+    }
+  }
+
+  function populateAlternativesForm(savedData) {
+    alternatives = {
+      1: {
+        nome_popular: savedData["1:nome_popular"] || "",
+        nome_cientifico: savedData["1:nome_cientifico"] || "",
+      },
+      2: {
+        nome_popular: savedData["2:nome_popular"] || "",
+        nome_cientifico: savedData["2:nome_cientifico"] || "",
+      },
+      3: {
+        nome_popular: savedData["3:nome_popular"] || "",
+        nome_cientifico: savedData["3:nome_cientifico"] || "",
+      },
+    };
+  }
+
+  function resetAlternativesForm() {
+    alternatives = {
+      1: { nome_popular: "", nome_cientifico: "" },
+      2: { nome_popular: "", nome_cientifico: "" },
+      3: { nome_popular: "", nome_cientifico: "" },
+    };
+  }
+
+  async function saveAlternatives() {
+    if (!pageContext?.speciesKey) {
+      alternativesSaveMessage = "❌ ID da espécie não encontrado";
+      return;
+    }
+
+    isSavingAlternatives = true;
+    alternativesSaveMessage = null;
+
+    try {
+      // Converter formato do formulário para o formato Redis
+      const redisAlternatives = {};
+
+      for (let i = 1; i <= 3; i++) {
+        const alt = alternatives[i];
+        if (alt.nome_popular.trim()) {
+          redisAlternatives[`${i}:nome_popular`] = alt.nome_popular.trim();
+        }
+        if (alt.nome_cientifico.trim()) {
+          redisAlternatives[`${i}:nome_cientifico`] =
+            alt.nome_cientifico.trim();
+        }
+      }
+
+      const response = await browser.runtime.sendMessage({
+        action: "saveAlternatives",
+        data: {
+          speciesKey: pageContext.speciesKey,
+          alternatives: redisAlternatives,
+        },
+      });
+
+      if (response && response.success) {
+        alternativesSaveMessage = "✅ Alternativas salvas com sucesso!";
+        savedAlternatives = redisAlternatives;
+      } else {
+        throw new Error(response?.error || "Erro desconhecido");
+      }
+    } catch (err) {
+      console.error("Erro ao salvar alternativas:", err);
+      alternativesSaveMessage = `❌ Erro: ${err.message}`;
+    } finally {
+      isSavingAlternatives = false;
+
+      // Limpar mensagem após alguns segundos
+      setTimeout(() => {
+        alternativesSaveMessage = null;
+      }, 4000);
+    }
+  }
+
+  function toggleAlternativesSection() {
+    showAlternativesSection = !showAlternativesSection;
+  }
+
+  function hasAlternativesSaved() {
+    return Object.keys(savedAlternatives).length > 0;
   }
 
   function getTaxonomicLevelDisplayName(level) {
@@ -387,6 +505,105 @@
             </p>
           {/if}
         </div>
+      </div>
+
+      <!-- Alternatives Section -->
+      <div class="bg-purple-50/50 border border-purple-200 rounded-lg p-3">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2 text-purple-800">
+            <span class="text-lg">🧬</span>
+            <span class="font-medium">Alternativas para Flashcards</span>
+          </div>
+          <button
+            on:click={toggleAlternativesSection}
+            class="text-purple-600 hover:text-purple-800 transition-colors"
+            title={showAlternativesSection ? "Fechar" : "Abrir"}
+          >
+            <span class="text-lg">{showAlternativesSection ? "▲" : "▼"}</span>
+          </button>
+        </div>
+
+        {#if hasAlternativesSaved() && !showAlternativesSection}
+          <p class="text-sm text-purple-600">
+            ✅ {Object.keys(savedAlternatives).length} alternativas salvas
+          </p>
+        {/if}
+
+        {#if showAlternativesSection}
+          <div class="space-y-4">
+            <p class="text-sm text-purple-700 mb-3">
+              Adicione 3 alternativas incorretas para esta espécie. Cada
+              alternativa pode ter nome popular e/ou científico.
+            </p>
+
+            {#each [1, 2, 3] as altNum}
+              <div class="border border-purple-200 rounded-lg p-3 bg-white/50">
+                <h4 class="font-medium text-purple-800 mb-2">
+                  Alternativa {altNum}
+                </h4>
+                <div class="space-y-2">
+                  <div>
+                    <label
+                      class="block text-xs text-purple-600 font-medium mb-1"
+                    >
+                      Nome Popular:
+                    </label>
+                    <input
+                      type="text"
+                      bind:value={alternatives[altNum].nome_popular}
+                      placeholder="Ex: Bem-te-vi-pequeno"
+                      class="w-full p-2 border border-purple-300 rounded-md text-sm"
+                      disabled={isSavingAlternatives}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      class="block text-xs text-purple-600 font-medium mb-1"
+                    >
+                      Nome Científico:
+                    </label>
+                    <input
+                      type="text"
+                      bind:value={alternatives[altNum].nome_cientifico}
+                      placeholder="Ex: Pitangus lictor"
+                      class="w-full p-2 border border-purple-300 rounded-md text-sm"
+                      disabled={isSavingAlternatives}
+                    />
+                  </div>
+                </div>
+              </div>
+            {/each}
+
+            <button
+              on:click={saveAlternatives}
+              disabled={isSavingAlternatives}
+              class="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white p-3 rounded-lg transition-colors font-medium"
+            >
+              {#if isSavingAlternatives}
+                <div class="flex items-center justify-center gap-2">
+                  <div
+                    class="animate-spin rounded-full h-4 w-4 border-b-2 border-white"
+                  ></div>
+                  <span>Salvando...</span>
+                </div>
+              {:else}
+                Salvar Alternativas
+              {/if}
+            </button>
+
+            {#if alternativesSaveMessage}
+              <div
+                class="text-sm p-2 rounded-md {alternativesSaveMessage.startsWith(
+                  '✅',
+                )
+                  ? 'bg-green-100 text-green-800 border border-green-200'
+                  : 'bg-red-100 text-red-800 border border-red-200'}"
+              >
+                {alternativesSaveMessage}
+              </div>
+            {/if}
+          </div>
+        {/if}
       </div>
 
       {#if savedImageData && savedImageData.imageUrl}
