@@ -524,9 +524,7 @@
         </div>
 
         {#if hasAlternativesSaved() && !showAlternativesSection}
-          <p class="text-sm text-purple-600">
-            ✅ {Object.keys(savedAlternatives).length} alternativas salvas
-          </p>
+          <p class="text-sm text-purple-600">✅ Alternativas salvas</p>
         {/if}
 
         {#if showAlternativesSection}
@@ -551,7 +549,7 @@
                     <input
                       type="text"
                       bind:value={alternatives[altNum].nome_popular}
-                      placeholder="Ex: Bem-te-vi-pequeno"
+                      placeholder=""
                       class="w-full p-2 border border-purple-300 rounded-md text-sm"
                       disabled={isSavingAlternatives}
                     />
@@ -565,7 +563,7 @@
                     <input
                       type="text"
                       bind:value={alternatives[altNum].nome_cientifico}
-                      placeholder="Ex: Pitangus lictor"
+                      placeholder=""
                       class="w-full p-2 border border-purple-300 rounded-md text-sm"
                       disabled={isSavingAlternatives}
                     />

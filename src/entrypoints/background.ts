@@ -199,7 +199,7 @@ async function handleTaxonomicLevelSelection(levelName: string, tab: any) {
       await browser.notifications.create({
         type: "basic",
         iconUrl: "icon/48.png",
-        title: "iCurador - Nível Salvo",
+        title: "iCurator - Nível Salvo",
         message: `🎯 Nível máximo definido como: ${levels[levelName]}\nTáxon ID: ${speciesKey}`,
       });
     } else {
@@ -210,7 +210,7 @@ async function handleTaxonomicLevelSelection(levelName: string, tab: any) {
     await browser.notifications.create({
       type: "basic",
       iconUrl: "icon/48.png",
-      title: "iCurador - Erro",
+      title: "iCurator - Erro",
       message: "❌ Erro ao salvar nível taxonômico",
     });
   }
@@ -232,7 +232,7 @@ async function updateContextMenusWithCurrentLevel(speciesKey: string) {
     // Menu principal
     browser.contextMenus.create({
       id: "icurator-main",
-      title: "🔍 iCurador",
+      title: "🔍 iCurator",
       contexts: ["all"],
       documentUrlPatterns: ["https://www.inaturalist.org/taxa/*"],
     });
